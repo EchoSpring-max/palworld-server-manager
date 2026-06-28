@@ -2,17 +2,17 @@
 
 Pal Local Manager is a native Windows desktop app for running and managing a local Palworld dedicated server from one place.
 
-It is built in C#/.NET WinForms and ships as a standalone `.exe`, so you do not need Python or a separate launcher.
+It is built in C#/.NET WinForms and ships as a standalone Windows `.exe`, so you do not need Python or a separate launcher.
 
-## What it does
+## Features
 
 - Starts and stops the Palworld dedicated server headlessly.
 - Runs Playit alongside the server so friends can join without opening ports manually.
-- Shows server status, players, uptime, and logs in a single dashboard.
+- Shows server status, players, uptime, Playit state, and logs in one dashboard.
 - Edits Palworld server settings from the UI.
 - Installs SteamCMD and downloads the dedicated server on first setup.
 - Imports and manages common mod files, including UE4SS and PalDefender-related folders.
-- Supports backups, RCON commands, scheduler actions, and Discord webhook notifications.
+- Supports backups, RCON commands, scheduler actions, Discord webhook notifications, and import/export of setup data.
 
 ## Requirements
 
@@ -38,6 +38,7 @@ The app keeps the server and Playit tunnel under one dashboard:
 - Playit is managed as a Docker container by container name.
 - Logs are captured into the server folder so you can debug startup issues without hunting for console windows.
 - Server settings are edited in the UI and written back to the local config files.
+- The EXE icon is embedded in the binary, so the app does not depend on a loose `app.ico` file at runtime.
 
 ## Default paths
 
@@ -48,12 +49,24 @@ C:\PalworldServer\SakuraSweetheart_99795188
 C:\PalworldServer\steamcmd
 ```
 
+## Playit notes
+
+- Palworld uses `8211 UDP` for the game port.
+- The app also uses `27015` for query, `8212` for REST API, and `25575` for RCON.
+- If Playit does not expose a public address in logs, you can paste it into the profile page manually.
+
 ## Release build
 
 The published Windows executable is in:
 
 ```text
 publish\PalLocalManager.exe
+```
+
+For convenience, a release zip is also generated locally at:
+
+```text
+release\PalLocalManager-win-x64.zip
 ```
 
 ## Build from source
@@ -65,5 +78,5 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 
 ## Notes
 
-- The app uses `app.ico` for the EXE icon and `palworld-logo.png` for the splash screen and dashboard logo.
+- The splash screen and dashboard logo use `palworld-logo.png`.
 - If Windows shows an older taskbar icon after updating, unpin and reopen the app once so the shell cache refreshes.
