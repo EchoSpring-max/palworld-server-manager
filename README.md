@@ -78,5 +78,4 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 
 ## Notes
 
-- The splash screen and dashboard logo use `palworld-logo.png`.
 - If Windows shows an older taskbar icon after updating, unpin and reopen the app once so the shell cache refreshes.
