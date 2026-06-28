@@ -66,6 +66,28 @@ internal static class LogoAssets
     }
 }
 
+internal static class IconAssets
+{
+    public static Icon? LoadAppIcon()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var resourceName = assembly.GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("app.ico", StringComparison.OrdinalIgnoreCase));
+
+        if (resourceName != null)
+        {
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream != null)
+            {
+                return new Icon(stream);
+            }
+        }
+
+        var filePath = Path.Combine(AppContext.BaseDirectory, "app.ico");
+        return File.Exists(filePath) ? new Icon(filePath) : null;
+    }
+}
+
 internal sealed class SplashForm : Form
 {
     private static readonly Color SplashBg = Color.FromArgb(42, 44, 56);
@@ -83,10 +105,10 @@ internal sealed class SplashForm : Form
         BackColor = SplashBg;
         DoubleBuffered = true;
 
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "app.ico");
-        if (File.Exists(iconPath))
+        var appIcon = IconAssets.LoadAppIcon();
+        if (appIcon != null)
         {
-            Icon = new Icon(iconPath);
+            Icon = appIcon;
         }
 
         var title = new Label
@@ -312,10 +334,10 @@ internal sealed class MainForm : Form
         ForeColor = TextColor;
         Font = new Font("Segoe UI", 9.5F);
         ResizeRedraw = true;
-        var iconPath = Path.Combine(appDir, "app.ico");
-        if (File.Exists(iconPath))
+        var appIcon = IconAssets.LoadAppIcon();
+        if (appIcon != null)
         {
-            Icon = new Icon(iconPath);
+            Icon = appIcon;
         }
         else
         {
