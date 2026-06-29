@@ -115,7 +115,7 @@ internal sealed class SplashForm : Form
         {
             Dock = DockStyle.Bottom,
             Height = 84,
-            Text = "Royalty Server Manager",
+            Text = "Pal Local Manager",
             TextAlign = ContentAlignment.MiddleCenter,
             Font = new Font("Segoe UI", 10F, FontStyle.Regular),
             ForeColor = SplashText,
@@ -232,6 +232,12 @@ internal sealed class MainForm : Form
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFO
     {
@@ -264,6 +270,41 @@ internal sealed class MainForm : Form
         public uint dwThreadId;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     private static readonly Color Bg = Color.FromArgb(16, 18, 25);
     private static readonly Color Sidebar = Color.FromArgb(8, 10, 15);
     private static readonly Color PanelBg = Color.FromArgb(28, 32, 43);
@@ -279,8 +320,8 @@ internal sealed class MainForm : Form
     private const int ResizeGrip = 8;
     private const int CreateNoWindowFlag = 0x08000000;
     private const int DetachedProcessFlag = 0x00000008;
-
     private readonly string appDir = AppContext.BaseDirectory;
+    private readonly string appDataDir;
     private readonly string configPath;
     private readonly ManagerConfig config;
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 5000 };
@@ -317,14 +358,19 @@ internal sealed class MainForm : Form
     private string? currentPlayitLogPath;
     private Panel titleBar = null!;
     private Panel titleButtons = null!;
+    private Rectangle lastNormalBounds;
+    private Rectangle customMaxBounds;
+    private bool isCustomMaximized;
 
     public MainForm()
     {
-        configPath = Path.Combine(appDir, "manager_config.json");
+        appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PalLocalManager");
+        configPath = Path.Combine(appDataDir, "manager_config.json");
         config = LoadConfig();
         Text = "Pal Local Manager";
         Width = 1280;
         Height = 820;
+        StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1050, 680);
         FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = true;
@@ -354,11 +400,21 @@ internal sealed class MainForm : Form
 
     private ManagerConfig LoadConfig()
     {
+        var legacyConfigPath = Path.Combine(appDir, "manager_config.json");
         try
         {
+            Directory.CreateDirectory(appDataDir);
+
             if (File.Exists(configPath))
             {
                 return JsonSerializer.Deserialize<ManagerConfig>(File.ReadAllText(configPath)) ?? new ManagerConfig();
+            }
+
+            if (File.Exists(legacyConfigPath))
+            {
+                var migrated = JsonSerializer.Deserialize<ManagerConfig>(File.ReadAllText(legacyConfigPath)) ?? new ManagerConfig();
+                File.WriteAllText(configPath, JsonSerializer.Serialize(migrated, new JsonSerializerOptions { WriteIndented = true }));
+                return migrated;
             }
         }
         catch { }
@@ -367,6 +423,7 @@ internal sealed class MainForm : Form
 
     private void SaveConfig()
     {
+        Directory.CreateDirectory(appDataDir);
         File.WriteAllText(configPath, JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
     }
 
@@ -409,13 +466,19 @@ internal sealed class MainForm : Form
 
         var side = new Panel { Dock = DockStyle.Fill, BackColor = Sidebar, Padding = new Padding(12, 28, 12, 12) };
         root.Controls.Add(side, 0, 0);
+        var nav = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Padding = new Padding(0, 16, 0, 0),
+            BackColor = Sidebar
+        };
+        side.Controls.Add(nav);
         var iconPicture = new PictureBox { Dock = DockStyle.Top, Height = 162, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Sidebar };
         iconPicture.Image = LogoAssets.LoadPalworldLogo();
         side.Controls.Add(iconPicture);
-
-        var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 30, 0, 0), BackColor = Sidebar };
-        side.Controls.Add(nav);
-        AddNav(nav, "Back to profiles", () => SelectPage(0));
+        AddNav(nav, "Home", () => SelectPage(0));
         AddNav(nav, "Settings", () => SelectPage(1));
         AddNav(nav, "Players", () => SelectPage(2));
         AddNav(nav, "Whitelist", () => SelectPage(3));
@@ -454,7 +517,7 @@ internal sealed class MainForm : Form
         serverBadge.Dock = DockStyle.Right;
         top.Controls.Add(Badge("LOCAL FREE", PanelBg));
         top.Controls[^1].Dock = DockStyle.Right;
-        top.Controls.Add(Badge("v1.0", PanelBg));
+        top.Controls.Add(Badge("v1.0.0.1", PanelBg));
         top.Controls[^1].Dock = DockStyle.Right;
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = PanelBg, Padding = new Padding(10), WrapContents = false };
@@ -682,7 +745,7 @@ internal sealed class MainForm : Form
         };
         titleButtons = buttons;
         var min = TitleButton("\u2212", () => WindowState = FormWindowState.Minimized);
-        var max = TitleButton("\u25A1", () => WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized);
+        var max = TitleButton("\u25A1", () => ToggleMaximize());
         var close = TitleButton("\u00D7", () => Close());
         close.BackColor = Color.FromArgb(40, 14, 20);
         min.SetBounds(0, 0, 48, 34);
@@ -702,11 +765,11 @@ internal sealed class MainForm : Form
             }
         }
 
-        void ToggleMaximize(MouseEventArgs e)
+        void ToggleMaximizeFromMouse(MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
             {
-                WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+                ToggleMaximize();
             }
         }
 
@@ -720,8 +783,8 @@ internal sealed class MainForm : Form
 
         bar.MouseDown += (_, e) => StartWindowDrag(e);
         title.MouseDown += (_, e) => StartWindowDrag(e);
-        bar.MouseDoubleClick += (_, e) => ToggleMaximize(e);
-        title.MouseDoubleClick += (_, e) => ToggleMaximize(e);
+        bar.MouseDoubleClick += (_, e) => ToggleMaximizeFromMouse(e);
+        title.MouseDoubleClick += (_, e) => ToggleMaximizeFromMouse(e);
         bar.MouseUp += (_, e) => OpenSystemMenu(e);
         title.MouseUp += (_, e) => OpenSystemMenu(e);
         return bar;
@@ -1288,16 +1351,14 @@ internal sealed class MainForm : Form
     {
         get
         {
-            const int wsThickFrame = 0x00040000;
-            var cp = base.CreateParams;
-            cp.Style |= wsThickFrame;
-            return cp;
+            return base.CreateParams;
         }
     }
 
     protected override void WndProc(ref Message m)
     {
         const int wmNcHitTest = 0x84;
+        const int wmGetMinMaxInfo = 0x24;
         const int htClient = 1;
         const int htCaption = 2;
         const int htLeft = 10;
@@ -1309,9 +1370,16 @@ internal sealed class MainForm : Form
         const int htBottomLeft = 16;
         const int htBottomRight = 17;
 
+        if (m.Msg == wmGetMinMaxInfo)
+        {
+            WmGetMinMaxInfo(m.HWnd, m.LParam);
+            m.Result = IntPtr.Zero;
+            return;
+        }
+
         base.WndProc(ref m);
 
-        if (m.Msg != wmNcHitTest || (int)m.Result != htClient || WindowState == FormWindowState.Maximized)
+        if (m.Msg != wmNcHitTest || (int)m.Result != htClient || WindowState == FormWindowState.Maximized || isCustomMaximized)
         {
             return;
         }
@@ -1336,6 +1404,21 @@ internal sealed class MainForm : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
+        if (isCustomMaximized && customMaxBounds.Width > 0 && Bounds != customMaxBounds)
+        {
+            BeginInvoke(new Action(() =>
+            {
+                if (isCustomMaximized)
+                {
+                    Bounds = customMaxBounds;
+                }
+            }));
+        }
+
+        if (!isCustomMaximized && WindowState == FormWindowState.Normal && Width >= MinimumSize.Width && Height >= MinimumSize.Height)
+        {
+            lastNormalBounds = Bounds;
+        }
         UpdateMaximizedBounds();
     }
 
@@ -1494,7 +1577,102 @@ internal sealed class MainForm : Form
             return;
         }
 
-        MaximizedBounds = Screen.FromHandle(Handle).WorkingArea;
+        var screen = GetTargetScreen();
+        MaximizedBounds = screen.Bounds;
+    }
+
+    private void ToggleMaximize()
+    {
+        if (isCustomMaximized || WindowState == FormWindowState.Maximized)
+        {
+            isCustomMaximized = false;
+            customMaxBounds = Rectangle.Empty;
+            WindowState = FormWindowState.Normal;
+            if (lastNormalBounds.Width > 0 && lastNormalBounds.Height > 0)
+            {
+                Bounds = EnsureVisibleBounds(lastNormalBounds);
+            }
+            else
+            {
+                Bounds = EnsureVisibleBounds(Bounds);
+            }
+            return;
+        }
+
+        if (WindowState == FormWindowState.Normal)
+        {
+            lastNormalBounds = Bounds;
+        }
+
+        var screen = GetTargetScreen();
+        customMaxBounds = GetCustomMaxBounds(screen);
+        isCustomMaximized = true;
+        WindowState = FormWindowState.Normal;
+        Bounds = customMaxBounds;
+        BeginInvoke(new Action(() =>
+        {
+            if (isCustomMaximized)
+            {
+                Bounds = customMaxBounds;
+            }
+        }));
+    }
+
+    private Rectangle EnsureVisibleBounds(Rectangle bounds)
+    {
+        var workingArea = Screen.FromRectangle(bounds).WorkingArea;
+        var width = Math.Min(Math.Max(bounds.Width, MinimumSize.Width), workingArea.Width);
+        var height = Math.Min(Math.Max(bounds.Height, MinimumSize.Height), workingArea.Height);
+        var x = Math.Max(workingArea.Left, Math.Min(bounds.X, workingArea.Right - width));
+        var y = Math.Max(workingArea.Top, Math.Min(bounds.Y, workingArea.Bottom - height));
+        return new Rectangle(x, y, width, height);
+    }
+
+    private Screen GetTargetScreen()
+    {
+        if (IsHandleCreated)
+        {
+            var boundsScreen = Screen.FromRectangle(Bounds);
+            if (boundsScreen != null)
+            {
+                return boundsScreen;
+            }
+
+            return Screen.FromHandle(Handle);
+        }
+
+        var cursor = Cursor.Position;
+        var cursorScreen = Screen.FromPoint(cursor);
+        return cursorScreen ?? Screen.PrimaryScreen!;
+    }
+
+    private Rectangle GetCustomMaxBounds(Screen screen)
+    {
+        return screen.Bounds;
+    }
+
+    private void WmGetMinMaxInfo(IntPtr hWnd, IntPtr lParam)
+    {
+        var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+        var monitor = MonitorFromWindow(hWnd, 2u);
+        if (monitor != IntPtr.Zero)
+        {
+            var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                var rcMonitor = monitorInfo.rcMonitor;
+                var width = rcMonitor.Right - rcMonitor.Left;
+                var height = rcMonitor.Bottom - rcMonitor.Top;
+                mmi.ptMaxPosition.X = 0;
+                mmi.ptMaxPosition.Y = 0;
+                mmi.ptMaxSize.X = width;
+                mmi.ptMaxSize.Y = height;
+                mmi.ptMaxTrackSize.X = width;
+                mmi.ptMaxTrackSize.Y = height;
+            }
+        }
+
+        Marshal.StructureToPtr(mmi, lParam, true);
     }
 
     private bool IsCaptionHit(Point point)
@@ -1565,7 +1743,7 @@ internal sealed class MainForm : Form
             playitBadge.Text = "Playit: " + status;
             playitBadge.BackColor = status.Contains("running", StringComparison.OrdinalIgnoreCase)
                 ? Green
-                : status.Contains("exited", StringComparison.OrdinalIgnoreCase)
+                : status.Contains("stopped", StringComparison.OrdinalIgnoreCase) || status.Contains("exited", StringComparison.OrdinalIgnoreCase)
                     ? Warn
                     : status.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
                         ? Danger
@@ -1632,13 +1810,13 @@ internal sealed class MainForm : Form
             var output = NormalizePlayitStatus(RunCapture("docker", $"inspect -f \"{{{{.State.Status}}}}\" {config.PlayitContainer}", 5000));
             if (!string.IsNullOrWhiteSpace(output))
             {
-                return output;
+                return output == "exited" ? "stopped" : output;
             }
 
             var psOutput = NormalizePlayitStatus(RunCapture("docker", $"ps -a --filter name=^{config.PlayitContainer}$ --format \"{{{{.Status}}}}\"", 5000));
             if (!string.IsNullOrWhiteSpace(psOutput))
             {
-                return psOutput;
+                return psOutput == "exited" ? "stopped" : psOutput;
             }
         }
         catch
@@ -1687,12 +1865,12 @@ internal sealed class MainForm : Form
         if (text.Equals("exited", StringComparison.OrdinalIgnoreCase) ||
             text.StartsWith("Exited ", StringComparison.OrdinalIgnoreCase))
         {
-            return "exited";
+            return "stopped";
         }
 
         if (text.Equals("created", StringComparison.OrdinalIgnoreCase))
         {
-            return "created";
+            return "stopped";
         }
 
         return text;
@@ -1786,6 +1964,13 @@ internal sealed class MainForm : Form
         try
         {
             var status = await Task.Run(GetPlayitStatus);
+            if (status.Contains("stopped", StringComparison.OrdinalIgnoreCase) || status.Contains("exited", StringComparison.OrdinalIgnoreCase))
+            {
+                Status("Playit is already stopped.");
+                RefreshPlayit();
+                return;
+            }
+
             if (!status.Contains("running", StringComparison.OrdinalIgnoreCase))
             {
                 Status("Playit is not running.");
